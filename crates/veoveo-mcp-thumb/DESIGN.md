@@ -107,7 +107,7 @@ through this program's `confine` subcommand, which limits itself with Landlock, 
 
 | Limit | What it keeps from a renderer |
 |---|---|
-| Reads only the system's programs, libraries and configuration, and writes only its job's folder | The server's key, other jobs and every kept thumbnail |
+| Reads only the system's programs, libraries and configuration, and writes only its job's folder. LibreOffice also writes `/tmp`, where it puts its one pipe whatever it is told; nothing of the server's is there, and only one LibreOffice runs at a time, so that no two can reach each other through it | The server's key, other jobs and every kept thumbnail |
 | Opens no TCP connection and listens on no port | The internet, the Hub, the file's way out |
 | Landlock's own rule on tracing a less limited process | The server's memory and environment, through `/proc` too |
 | A process group of its own, ended when the step does | What it leaves running |

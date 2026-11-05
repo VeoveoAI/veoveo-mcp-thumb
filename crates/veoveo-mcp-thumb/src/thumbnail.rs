@@ -29,7 +29,7 @@ use crate::{
 };
 
 /// Changes when what is drawn changes, so that older pictures are drawn again.
-const RECIPE: &str = "1";
+const RECIPE: &str = "2";
 /// How long a file that could not be drawn is left before it is tried again.
 const RETRY_AFTER: Duration = Duration::from_secs(60 * 60);
 /// How many files draw at once.

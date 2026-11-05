@@ -7,7 +7,7 @@
 //! reading the server's memory or environment.
 //!
 //! ```sh
-//! veoveo-mcp-thumb confine JOB [--gpu] -- PROGRAM [ARGUMENT]...
+//! veoveo-mcp-thumb confine JOB [--gpu] [--tmp] -- PROGRAM [ARGUMENT]...
 //! ```
 
 #[cfg(target_os = "linux")]
@@ -48,19 +48,23 @@ const MAX_ADDRESS_SPACE: u64 = 6 * 1024 * 1024 * 1024;
 struct Asked<'a> {
     job: &'a str,
     gpu: bool,
+    /// It may also write `/tmp`. LibreOffice puts its one pipe there, wherever else it is told to
+    /// work, and fails without it.
+    tmp: bool,
     program: &'a str,
     arguments: &'a [String],
 }
 
 fn parse(args: &[String]) -> Result<Asked<'_>> {
-    let usage = "confine JOB [--gpu] -- PROGRAM [ARGUMENT]...";
+    let usage = "confine JOB [--gpu] [--tmp] -- PROGRAM [ARGUMENT]...";
     let Some(separator) = args.iter().position(|arg| arg == "--") else {
         bail!("usage: {usage}");
     };
     let (before, after) = args.split_at(separator);
-    let (job, gpu) = match before {
-        [job] => (job, false),
-        [job, flag] if flag == "--gpu" => (job, true),
+    let (job, gpu, tmp) = match before {
+        [job] => (job, false, false),
+        [job, flag] if flag == "--gpu" => (job, true, false),
+        [job, flag] if flag == "--tmp" => (job, false, true),
         _ => bail!("usage: {usage}"),
     };
     let Some((program, arguments)) = after[1..].split_first() else {
@@ -69,6 +73,7 @@ fn parse(args: &[String]) -> Result<Asked<'_>> {
     Ok(Asked {
         job,
         gpu,
+        tmp,
         program,
         arguments,
     })
@@ -124,6 +129,9 @@ fn limit(asked: &Asked<'_>) -> Result<()> {
         .add_rules(path_beneath_rules(exists(&READABLE), reading))?
         .add_rules(path_beneath_rules([asked.job], everything))?
         .add_rules(path_beneath_rules(["/dev/null"], everything))?;
+    if asked.tmp {
+        created = created.add_rules(path_beneath_rules(["/tmp"], everything))?;
+    }
     if asked.gpu {
         created = created.add_rules(path_beneath_rules(exists(&GPU), everything))?;
     } else {
@@ -168,7 +176,13 @@ mod tests {
         let args = strings(&["/j", "--gpu", "--", "f3d"]);
         let asked = parse(&args).unwrap();
         assert!(asked.gpu);
+        assert!(!asked.tmp);
         assert!(asked.arguments.is_empty());
+
+        let args = strings(&["/j", "--tmp", "--", "soffice"]);
+        let asked = parse(&args).unwrap();
+        assert!(asked.tmp);
+        assert!(!asked.gpu);
 
         for wrong in [
             strings(&["/j", "convert"]),

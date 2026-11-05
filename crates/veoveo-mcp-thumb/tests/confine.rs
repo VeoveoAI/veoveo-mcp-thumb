@@ -72,6 +72,31 @@ fn it_writes_its_job_and_nothing_else() {
 }
 
 #[test]
+fn it_writes_tmp_only_when_it_is_told_to() {
+    let job = tempfile::tempdir().unwrap();
+    if !available(job.path()) {
+        return;
+    }
+    let name = format!("/tmp/veoveo-confine-test-{}", std::process::id());
+    let write = format!("echo x > {name}");
+    assert!(
+        !confined(job.path(), "/bin/sh", &["-c", &write])
+            .status
+            .success()
+    );
+    assert!(!Path::new(&name).exists());
+    let wrote = Command::new(env!("CARGO_BIN_EXE_veoveo-mcp-thumb"))
+        .arg("confine")
+        .arg(job.path())
+        .arg("--tmp")
+        .args(["--", "/bin/sh", "-c", &write])
+        .output()
+        .unwrap();
+    assert!(wrote.status.success(), "{wrote:?}");
+    std::fs::remove_file(&name).unwrap();
+}
+
+#[test]
 fn it_reads_nothing_of_another_job_or_the_servers_keys() {
     let job = tempfile::tempdir().unwrap();
     if !available(job.path()) {

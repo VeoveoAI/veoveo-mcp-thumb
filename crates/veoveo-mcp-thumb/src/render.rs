@@ -7,11 +7,13 @@ use std::{
     os::unix::process::CommandExt as _,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::Duration,
 };
 
 use anyhow::{Context, bail};
 use rustix::process::{Pid, Signal, kill_process_group};
+use tokio::sync::Semaphore;
 
 /// The picture every recipe leaves in the job's folder.
 const PAGE: &str = "page.png";
@@ -137,16 +139,31 @@ impl Recipe {
     }
 }
 
+/// What a step may reach beyond its job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    Job,
+    Gpu,
+    /// `/tmp` too, for LibreOffice's pipe. Only one such step runs at a time, so that no two can
+    /// reach each other through theirs.
+    Tmp,
+}
+
 /// The confined steps of drawing files.
 #[derive(Clone)]
 pub struct Renderer {
     /// This program, whose `confine` subcommand starts each step.
     program: PathBuf,
+    /// One LibreOffice at a time.
+    office: Arc<Semaphore>,
 }
 
 impl Renderer {
     pub fn new(program: PathBuf) -> Self {
-        Self { program }
+        Self {
+            program,
+            office: Arc::new(Semaphore::new(1)),
+        }
     }
 
     /// Draws `input`, in the folder `job`, into its two pictures.
@@ -159,7 +176,7 @@ impl Renderer {
                 let side = LARGE_SIDE.to_string();
                 self.step(
                     job,
-                    false,
+                    Reach::Job,
                     "rsvg-convert",
                     &[
                         "--keep-aspect-ratio".into(),
@@ -188,7 +205,7 @@ impl Renderer {
         first.push("[0]");
         self.step(
             job,
-            false,
+            Reach::Job,
             "convert",
             &[
                 first,
@@ -223,12 +240,18 @@ impl Renderer {
         };
         // A second in, past a fade from black; a clip shorter than that from its start.
         let skipped = self
-            .step(job, false, "ffmpeg", &frame(&["-ss", "1"]), STEP_TIMEOUT)
+            .step(
+                job,
+                Reach::Job,
+                "ffmpeg",
+                &frame(&["-ss", "1"]),
+                STEP_TIMEOUT,
+            )
             .await;
         if skipped.is_ok() && job.join(PAGE).exists() {
             return Ok(());
         }
-        self.step(job, false, "ffmpeg", &frame(&[]), STEP_TIMEOUT)
+        self.step(job, Reach::Job, "ffmpeg", &frame(&[]), STEP_TIMEOUT)
             .await
     }
 
@@ -248,7 +271,9 @@ impl Renderer {
             "-y".into(),
             job.join(PAGE).into(),
         ];
-        let covered = self.step(job, false, "ffmpeg", &cover, STEP_TIMEOUT).await;
+        let covered = self
+            .step(job, Reach::Job, "ffmpeg", &cover, STEP_TIMEOUT)
+            .await;
         if covered.is_ok() && job.join(PAGE).exists() {
             return Ok(());
         }
@@ -268,13 +293,14 @@ impl Renderer {
             "-y".into(),
             job.join(PAGE).into(),
         ];
-        self.step(job, false, "ffmpeg", &wave, STEP_TIMEOUT).await
+        self.step(job, Reach::Job, "ffmpeg", &wave, STEP_TIMEOUT)
+            .await
     }
 
     async fn pdf(&self, job: &Path, input: &Path) -> anyhow::Result<()> {
         self.step(
             job,
-            false,
+            Reach::Job,
             "pdftoppm",
             &[
                 "-png".into(),
@@ -296,9 +322,14 @@ impl Renderer {
     async fn office(&self, job: &Path, input: &Path) -> anyhow::Result<()> {
         let profile = format!("-env:UserInstallation=file://{}", job.join("lo").display());
         let out = job.join("pdf");
+        let _turn = self
+            .office
+            .acquire()
+            .await
+            .context("waiting for LibreOffice")?;
         self.step(
             job,
-            false,
+            Reach::Tmp,
             "soffice",
             &[
                 "--headless".into(),
@@ -325,7 +356,7 @@ impl Renderer {
     async fn model(&self, job: &Path, input: &Path) -> anyhow::Result<()> {
         self.step(
             job,
-            true,
+            Reach::Gpu,
             "f3d",
             &[
                 "--no-config".into(),
@@ -354,7 +385,7 @@ impl Renderer {
         anyhow::ensure!(page.exists(), "the recipe drew nothing");
         self.step(
             job,
-            false,
+            Reach::Job,
             "convert",
             &[
                 page.into(),
@@ -379,15 +410,21 @@ impl Renderer {
     async fn step(
         &self,
         job: &Path,
-        gpu: bool,
+        reach: Reach,
         program: &str,
         args: &[OsString],
         timeout: Duration,
     ) -> anyhow::Result<()> {
         let mut command = std::process::Command::new(&self.program);
         command.arg("confine").arg(job);
-        if gpu {
-            command.arg("--gpu");
+        match reach {
+            Reach::Job => {}
+            Reach::Gpu => {
+                command.arg("--gpu");
+            }
+            Reach::Tmp => {
+                command.arg("--tmp");
+            }
         }
         command
             .arg("--")
@@ -404,7 +441,7 @@ impl Renderer {
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .process_group(0);
-        if gpu {
+        if reach == Reach::Gpu {
             command
                 .env("NVIDIA_VISIBLE_DEVICES", "all")
                 .env("NVIDIA_DRIVER_CAPABILITIES", "all");
