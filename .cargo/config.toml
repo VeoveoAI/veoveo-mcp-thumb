@@ -1,0 +1,3 @@
+# veoveo-core's sqlx query macros read its committed `.sqlx` metadata instead of a database.
+[env]
+SQLX_OFFLINE = "true"
