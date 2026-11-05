@@ -27,9 +27,9 @@ FROM source AS check
 # mounts of the build host, so consecutive checks reuse compiled crates. It runs as the sandbox
 # user, so these caches are its own, apart from the root-owned registry cache of the dev stage's
 # cargo install. Factory builds never use them.
-RUN --mount=type=cache,id=veoveo-mcp-files-cargo-registry,target=/usr/local/cargo/registry,uid=1000,sharing=locked \
-    --mount=type=cache,id=veoveo-mcp-files-cargo-git,target=/usr/local/cargo/git,uid=1000,sharing=locked \
-    --mount=type=cache,id=veoveo-mcp-files-target,target=/home/sandbox/src/target,uid=1000,sharing=locked \
+RUN --mount=type=cache,id=veoveo-mcp-thumb-cargo-registry,target=/usr/local/cargo/registry,uid=1000,sharing=locked \
+    --mount=type=cache,id=veoveo-mcp-thumb-cargo-git,target=/usr/local/cargo/git,uid=1000,sharing=locked \
+    --mount=type=cache,id=veoveo-mcp-thumb-target,target=/home/sandbox/src/target,uid=1000,sharing=locked \
     cargo fmt --check \
     && cargo clippy --locked --all-targets --all-features -- -D warnings \
     && cargo deny --locked check \

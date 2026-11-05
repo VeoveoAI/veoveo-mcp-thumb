@@ -2,9 +2,9 @@
 
 These rules apply to this repository. The
 crate's own rules are in
-[`crates/veoveo-mcp-files/AGENTS.md`](crates/veoveo-mcp-files/AGENTS.md).
+[`crates/veoveo-mcp-thumb/AGENTS.md`](crates/veoveo-mcp-thumb/AGENTS.md).
 
-- The design is in [crates/veoveo-mcp-files/DESIGN.md](crates/veoveo-mcp-files/DESIGN.md). Change it in the
+- The design is in [crates/veoveo-mcp-thumb/DESIGN.md](crates/veoveo-mcp-thumb/DESIGN.md). Change it in the
   same change as the code.
 - Use upstream runtimes unmodified. Adapt through supported configuration.
 - Prefer strong types: typed structs, enums and domain identifiers over raw strings and
@@ -16,7 +16,7 @@ crate's own rules are in
   from it.
 - How an agent uses the server is in its skills, `skills/{name}/SKILL.md` and the files
   beside it, embedded by `build.rs` and served at `skill://{slug}/{name}/{path}`, as the
-  design's [Skills](crates/veoveo-mcp-files/DESIGN.md#skills) describes. The
+  design's [Skills](crates/veoveo-mcp-thumb/DESIGN.md#skills) describes. The
   `instructions` say what the server is and name each skill's address; tool and resource
   descriptions say only what each does. Skill text names tools as callers see them
   through the Hub, `{slug}__{tool}`.

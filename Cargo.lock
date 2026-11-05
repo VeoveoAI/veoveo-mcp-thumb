@@ -3684,7 +3684,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "veoveo-mcp-files"
+name = "veoveo-mcp-thumb"
 version = "0.1.0"
 dependencies = [
  "anyhow",

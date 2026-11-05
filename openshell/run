@@ -3,10 +3,9 @@
 set -e
 # The template's CPU limit, which cargo cannot read from inside the sandbox.
 export CARGO_BUILD_JOBS=4
-cargo build --locked --release --bin veoveo-mcp-files
+cargo build --locked --release --bin veoveo-mcp-thumb
 export VEOVEO_KEY_DIRECTORY=/sandbox/state/keys
 export VEOVEO_THUMBNAIL_DIRECTORY=/sandbox/state/thumbnails
 export VEOVEO_WORK_DIRECTORY=/sandbox/state/work
-export VEOVEO_APP_HTML="$PWD/crates/veoveo-mcp-files/assets/browser.html"
 mkdir -p "$VEOVEO_KEY_DIRECTORY"
-exec target/release/veoveo-mcp-files
+exec target/release/veoveo-mcp-thumb
