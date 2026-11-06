@@ -84,6 +84,19 @@ pub struct Probe {
     pub size: u64,
 }
 
+/// What a folder's listing says of its files, by name. Lore's address is the file's `ETag`.
+#[derive(Debug, Deserialize)]
+struct Listing {
+    entries: Vec<ListedEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListedEntry {
+    name: String,
+    #[serde(default)]
+    address: Option<String>,
+}
+
 /// The Hub, for one caller at one profile.
 #[derive(Clone)]
 pub struct Reader {
@@ -164,7 +177,7 @@ impl Reader {
             .http
             .get(url)
             .bearer_auth(bearer.expose())
-            .header(ACCEPT, "application/octet-stream")
+            .header(ACCEPT, "application/octet-stream, application/json")
             .timeout(timeout);
         if let Some(range) = range {
             request = request.header(RANGE, range);
@@ -200,6 +213,32 @@ impl Reader {
             .or_else(|| header(CONTENT_LENGTH.as_str())?.parse().ok())
             .unwrap_or_default();
         Ok(Probe { address, size })
+    }
+
+    /// The content addresses of a folder's files, by name, read as the caller, so Lore decides
+    /// whether they may read it now.
+    pub async fn addresses(
+        &self,
+        repository: &RepositoryId,
+        branch: &BranchName,
+        folder: &str,
+    ) -> Result<std::collections::HashMap<String, String>, HubError> {
+        // The Hub takes a trailing `/` for a folder.
+        let url = self.hub.files_route(
+            &self.profile,
+            repository,
+            branch,
+            folder
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .chain([""]),
+        );
+        let body = self.get(url, None, LISTING_TIMEOUT).await?.bytes().await?;
+        Ok(serde_json::from_slice::<Listing>(&body)?
+            .entries
+            .into_iter()
+            .filter_map(|entry| Some((entry.name, entry.address?)))
+            .collect())
     }
 
     /// Writes the whole file to `to`.

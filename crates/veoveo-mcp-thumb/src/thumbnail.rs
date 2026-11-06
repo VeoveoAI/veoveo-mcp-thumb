@@ -11,6 +11,7 @@ use std::{
 
 use anyhow::Context as _;
 use base64::Engine as _;
+use futures::StreamExt as _;
 use sha2::{Digest as _, Sha256};
 use tokio::{io::AsyncSeekExt as _, sync::Semaphore};
 use veoveo_mcp_artifact::{
@@ -21,8 +22,8 @@ use veoveo_mcp_usd::contract as usd;
 
 use crate::{
     contract::{
-        ArtifactRef, BranchName, FilePath, FileSource, RepositoryId, Thumbnail, ThumbnailRequest,
-        ThumbnailSize,
+        ArtifactRef, BranchName, FilePath, FileSource, ReadyThumbnail, RepositoryId, Thumbnail,
+        ThumbnailRequest, ThumbnailSize,
     },
     hub::{Ends, HubError, Reader},
     render::{LARGE, Recipe, Renderer, SMALL, is_stage},
@@ -41,6 +42,11 @@ const MAX_WHOLE: u64 = 2 * 1024 * 1024 * 1024;
 /// How much of a video's or a sound's start and end a frame is read from.
 const HEAD: u64 = 32 * 1024 * 1024;
 const TAIL: u64 = 16 * 1024 * 1024;
+/// How many reads one `ready` makes at once.
+const READS_AT_ONCE: usize = 8;
+/// The most base64 one `ready` answers, well inside an MCP response even written twice. What does
+/// not fit is left pending.
+const MOST_READY_BYTES: usize = 3 * 1024 * 1024;
 
 /// Why a picture was refused, as opposed to not drawn.
 #[derive(Debug, thiserror::Error)]
@@ -166,6 +172,107 @@ impl Thumbnails {
                 };
                 Ok(self.picture(drawing, request.size).await)
             }
+        }
+    }
+
+    /// What is ready of each of `sources` for their caller, in their order, drawing nothing. One
+    /// listing says the content of every file of a folder, and it is read as the caller, as is
+    /// each artifact, so the owner still decides and a person without a grant learns nothing.
+    /// Anything this cannot tell is left pending for `thumbnail`, which can say why.
+    pub async fn ready(
+        &self,
+        reader: &Reader,
+        sources: &[FileSource],
+        size: ThumbnailSize,
+    ) -> Vec<ReadyThumbnail> {
+        let folders: std::collections::BTreeSet<_> =
+            sources.iter().filter_map(folder_of_source).collect();
+        let listed: HashMap<_, _> = futures::stream::iter(folders)
+            .map(|folder| folder_addresses(reader, folder))
+            .buffer_unordered(READS_AT_ONCE)
+            .collect()
+            .await;
+        let asked: Vec<ArtifactRef> = sources
+            .iter()
+            .filter_map(|source| match source {
+                FileSource::Artifact { artifact } => Some(artifact.clone()),
+                FileSource::Lore { .. } => None,
+            })
+            .collect();
+        let artifacts: HashMap<_, _> = futures::stream::iter(asked)
+            .map(|artifact| artifact_record(reader, artifact))
+            .buffer_unordered(READS_AT_ONCE)
+            .collect()
+            .await;
+        let mut left = MOST_READY_BYTES;
+        let mut answers = Vec::with_capacity(sources.len());
+        for source in sources {
+            let known = match source {
+                FileSource::Lore { path, .. } => {
+                    let name = path.file_name();
+                    folder_of_source(source)
+                        .and_then(|folder| listed.get(&folder)?.as_ref())
+                        .and_then(|addresses| addresses.get(name))
+                        // A stage is the USD server's to say.
+                        .filter(|_| !is_stage(name))
+                        .map(|address| {
+                            (format!("lore\0{address}"), name.to_owned(), None::<String>)
+                        })
+                }
+                FileSource::Artifact { artifact } => artifacts
+                    .get(artifact)
+                    .and_then(Option::as_ref)
+                    .map(|(name, media_type)| {
+                        (
+                            format!("artifact\0{artifact}"),
+                            name.clone(),
+                            Some(media_type.clone()),
+                        )
+                    }),
+            };
+            let answer = match known {
+                Some((content, name, media_type)) => {
+                    self.ready_one(&content, &name, media_type.as_deref(), size, &mut left)
+                        .await
+                }
+                None => ReadyThumbnail {
+                    pending: true,
+                    ..ReadyThumbnail::default()
+                },
+            };
+            answers.push(answer);
+        }
+        answers
+    }
+
+    async fn ready_one(
+        &self,
+        content: &str,
+        name: &str,
+        media_type: Option<&str>,
+        size: ThumbnailSize,
+        left: &mut usize,
+    ) -> ReadyThumbnail {
+        if Recipe::of(name, media_type).is_none() {
+            return ReadyThumbnail::default();
+        }
+        let key = key(content);
+        if let Some(found) = self.kept_picture(&key, size).await {
+            let bytes = found.data.as_ref().map_or(0, String::len);
+            if bytes <= *left {
+                *left -= bytes;
+                return ReadyThumbnail {
+                    media_type: found.media_type,
+                    data: found.data,
+                    pending: false,
+                };
+            }
+        } else if self.failed_lately(&key).await {
+            return ReadyThumbnail::default();
+        }
+        ReadyThumbnail {
+            pending: true,
+            ..ReadyThumbnail::default()
         }
     }
 
@@ -346,6 +453,58 @@ impl Origin<'_> {
     }
 }
 
+/// One folder of a repository, on a branch.
+type Folder = (RepositoryId, BranchName, String);
+
+/// The folder a Lore file is in.
+fn folder_of_source(source: &FileSource) -> Option<Folder> {
+    let FileSource::Lore {
+        repository,
+        branch,
+        path,
+    } = source
+    else {
+        return None;
+    };
+    let folder = path
+        .as_str()
+        .rsplit_once('/')
+        .map_or("", |(folder, _)| folder)
+        .to_owned();
+    Some((repository.clone(), branch.clone(), folder))
+}
+
+/// A folder's listing as the caller, or nothing when it could not be read.
+async fn folder_addresses(
+    reader: &Reader,
+    folder: Folder,
+) -> (Folder, Option<HashMap<String, String>>) {
+    let addresses = reader.addresses(&folder.0, &folder.1, &folder.2).await.ok();
+    (folder, addresses)
+}
+
+/// An artifact's name and media type as the caller, or nothing when it could not be read.
+async fn artifact_record(
+    reader: &Reader,
+    artifact: ArtifactRef,
+) -> (ArtifactRef, Option<(String, String)>) {
+    let record = match artifact_id(&artifact) {
+        Ok(id) => reader
+            .client
+            .read(ReadArtifact { artifact: id })
+            .await
+            .ok()
+            .map(|entry| {
+                (
+                    entry.artifact.name.to_string(),
+                    entry.artifact.media_type.to_string(),
+                )
+            }),
+        Err(_) => None,
+    };
+    (artifact, record)
+}
+
 fn artifact_id(artifact: &ArtifactRef) -> Result<ArtifactId, ThumbnailError> {
     artifact
         .as_str()
@@ -424,6 +583,75 @@ mod tests {
         assert_ne!(key_of, key("artifact\0abc"));
         assert_eq!(key_of.len(), 64);
         assert!(key_of.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn what_is_ready_is_a_picture_nothing_or_left_for_thumbnail_and_never_a_draw() {
+        let folder = tempfile::tempdir().unwrap();
+        let thumbnails = thumbnails(folder.path());
+        let small = ThumbnailSize::Small;
+        let mut left = MOST_READY_BYTES;
+        let ready = |content: &'static str, name: &'static str| (content, name);
+
+        let (content, name) = ready("lore\0kept", "a.png");
+        std::fs::write(thumbnails.path(&key(content), small), [1, 2, 3]).unwrap();
+        let kept = thumbnails
+            .ready_one(content, name, None, small, &mut left)
+            .await;
+        assert_eq!(kept.data.as_deref(), Some("AQID"));
+        assert!(!kept.pending);
+        assert_eq!(left, MOST_READY_BYTES - 4);
+
+        // No recipe, or a failure lately: nothing to wait for, and no further request.
+        let (content, name) = ready("lore\0data", "archive.bin");
+        let none = thumbnails
+            .ready_one(content, name, None, small, &mut left)
+            .await;
+        assert_eq!(none, ReadyThumbnail::default());
+        let (content, name) = ready("lore\0broken", "b.png");
+        std::fs::write(thumbnails.failed_path(&key(content)), b"").unwrap();
+        let none = thumbnails
+            .ready_one(content, name, None, small, &mut left)
+            .await;
+        assert_eq!(none, ReadyThumbnail::default());
+
+        // Not drawn yet: left for `thumbnail`, with nothing started here.
+        let (content, name) = ready("lore\0new", "c.png");
+        let waiting = thumbnails
+            .ready_one(content, name, None, small, &mut left)
+            .await;
+        assert!(waiting.pending && waiting.data.is_none());
+        assert!(!thumbnails.failed_lately(&key(content)).await);
+        assert_eq!(
+            std::fs::read_dir(folder.path().join("work"))
+                .unwrap()
+                .count(),
+            0
+        );
+
+        // What does not fit in the answer is left for `thumbnail` too.
+        let (content, name) = ready("lore\0kept", "a.png");
+        let mut none_left = 3;
+        let over = thumbnails
+            .ready_one(content, name, None, small, &mut none_left)
+            .await;
+        assert!(over.pending && over.data.is_none());
+        assert_eq!(none_left, 3);
+    }
+
+    #[test]
+    fn a_files_folder_is_its_listing() {
+        let source = |path: &str| FileSource::Lore {
+            repository: RepositoryId::parse("r").unwrap(),
+            branch: BranchName::parse("main").unwrap(),
+            path: FilePath::parse(path).unwrap(),
+        };
+        assert_eq!(folder_of_source(&source("a/b/c.png")).unwrap().2, "a/b");
+        assert_eq!(folder_of_source(&source("c.png")).unwrap().2, "");
+        assert_eq!(
+            folder_of_source(&source("a/b/c.png")),
+            folder_of_source(&source("a/b/d.png"))
+        );
     }
 
     #[test]

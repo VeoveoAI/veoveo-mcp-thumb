@@ -13,7 +13,10 @@ use veoveo_mcp_artifact::contract::ArtifactPermission;
 use veoveo_mcp_usd::contract::UsdPermission;
 
 use crate::{
-    contract::{ThumbPermission, Thumbnail, ThumbnailRequest},
+    contract::{
+        MOST_READY_FILES, ReadyThumbnails, ReadyThumbnailsRequest, ThumbPermission, Thumbnail,
+        ThumbnailRequest,
+    },
     hub::{Hub, Reader},
     thumbnail::Thumbnails,
 };
@@ -38,25 +41,46 @@ impl ThumbMcp {
         Self { hub, thumbnails }
     }
 
-    async fn thumbnail(
-        &self,
-        request: ThumbnailRequest,
-        context: RequestContext<RoleServer>,
-    ) -> Result<Thumbnail, ToolError> {
-        let identity = hub_identity(&context).map_err(|error: McpError| {
+    fn reader(&self, context: &RequestContext<RoleServer>) -> Result<Reader, ToolError> {
+        let identity = hub_identity(context).map_err(|error: McpError| {
             ToolError::Rejected(format!("the caller is not known: {}", error.message))
         })?;
-        let reader = Reader {
+        Ok(Reader {
             hub: self.hub.clone(),
             client: context.client().map_err(|error: McpError| {
                 ToolError::Rejected(format!("no calls for the caller: {}", error.message))
             })?,
             profile: identity.profile,
-        };
+        })
+    }
+
+    async fn thumbnail(
+        &self,
+        request: ThumbnailRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Thumbnail, ToolError> {
         self.thumbnails
-            .thumbnail(&reader, &request)
+            .thumbnail(&self.reader(&context)?, &request)
             .await
             .map_err(|error| ToolError::Rejected(format!("reading the file: {error}")))
+    }
+
+    async fn ready_thumbnails(
+        &self,
+        request: ReadyThumbnailsRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadyThumbnails, ToolError> {
+        if request.sources.len() > MOST_READY_FILES {
+            return Err(ToolError::Rejected(format!(
+                "at most {MOST_READY_FILES} files at a time"
+            )));
+        }
+        Ok(ReadyThumbnails {
+            thumbnails: self
+                .thumbnails
+                .ready(&self.reader(&context)?, &request.sources, request.size)
+                .await,
+        })
     }
 }
 
@@ -73,6 +97,13 @@ static ROUTES: LazyLock<Routes<ThumbMcp>> = LazyLock::new(|| {
             "Make a thumbnail of a file you can read in a Lore repository or Artifact, as base64, or say there is none. The first call for a file's content draws it; later ones answer from what was drawn, after asking whether you may still read it.",
             policy(),
             |domain, request, context| async move { domain.thumbnail(request, context).await },
+        )
+        .tool::<ReadyThumbnailsRequest, _, _>(
+            "What is ready of many files you can read by one request: each one's kept thumbnail as base64, or none, or `pending` when `thumbnail` can still make one. It never draws.",
+            policy(),
+            |domain, request, context| async move {
+                domain.ready_thumbnails(request, context).await
+            },
         )
         .build()
 });

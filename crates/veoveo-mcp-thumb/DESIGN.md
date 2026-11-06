@@ -36,6 +36,7 @@ port         8807
 | Kind | Name | Permission | Answer |
 |---|---|---|---|
 | Tool | `thumbnail` | `thumb.thumbnails.read` | `Thumbnail`: a picture of `source` at `size`, with its media type, in base64, or nothing when one cannot be made |
+| Tool | `ready_thumbnails` | `thumb.thumbnails.read` | `ReadyThumbnails`: what is ready of up to 64 `sources` by one request, each a picture, nothing, or `pending` for `thumbnail`. It never draws |
 
 `source` is `{from: "lore", repository, branch, path}` or `{from: "artifact", artifact}`. `size` is `small`,
 at most 480 pixels on a side, or `large`, at most 1280. A refused file is an error; a file that cannot be

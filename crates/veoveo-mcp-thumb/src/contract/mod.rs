@@ -11,4 +11,7 @@ mod thumbnail;
 pub use ids::{ArtifactRef, BranchName, FilePath, RepositoryId, ThumbIdError};
 pub use permissions::{ThumbPermission, ThumbScope};
 pub use resource::{ThumbDocument, ThumbResource, ThumbResourceError};
-pub use thumbnail::{FileSource, Thumbnail, ThumbnailRequest, ThumbnailSize};
+pub use thumbnail::{
+    FileSource, MOST_READY_FILES, ReadyThumbnail, ReadyThumbnails, ReadyThumbnailsRequest,
+    Thumbnail, ThumbnailRequest, ThumbnailSize,
+};

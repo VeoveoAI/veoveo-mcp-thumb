@@ -54,7 +54,7 @@ async fn tools_are_listed_with_their_permission() {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         names.sort_unstable();
-        assert_eq!(names, ["thumbnail"]);
+        assert_eq!(names, ["ready_thumbnails", "thumbnail"]);
 
         // With nothing granted, nothing is admitted.
         let (nothing, _kept) = hub(&[]);
