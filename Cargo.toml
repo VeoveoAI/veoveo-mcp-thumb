@@ -19,9 +19,9 @@ veoveo-types = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "a8dafe9
 # feature for hosting, registration and the forwarded identity.
 veoveo-hub-sdk = { git = "https://github.com/VeoveoAI/veoveo-hub-sdk", rev = "5ff33f1f669385099fdd405f6e6bbd6ee190a45c", default-features = false }
 # Artifact's client, which reads an artifact's bytes. It pins this SDK revision, so the two move together.
-veoveo-mcp-artifact = { git = "https://github.com/VeoveoAI/veoveo-mcp-artifact", rev = "0f6d50106ba3ac3a4e48f3677a743472ebe73a50", default-features = false }
+veoveo-mcp-artifact = { git = "https://github.com/VeoveoAI/veoveo-mcp-artifact", rev = "548dac1fcd4e23e87f8c6c4a9e43e011d5d6b637", default-features = false }
 # USD's contract, for its pictures of stages. The same.
-veoveo-mcp-usd = { git = "https://github.com/VeoveoAI/veoveo-mcp-usd", rev = "8e8e4f46f37b1ea4f95ace2e3344b40ed61261df", default-features = false }
+veoveo-mcp-usd = { git = "https://github.com/VeoveoAI/veoveo-mcp-usd", rev = "c51f269a723d7de4ea12fa6ebcca84a43b4a93a0", default-features = false }
 
 anyhow = "=1.0.104"
 axum = { version = "0.8.9", default-features = false }
