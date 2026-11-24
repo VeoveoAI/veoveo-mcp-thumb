@@ -155,3 +155,13 @@ No tables. Under `/sandbox/state`: the registration's `keys/`, the kept `thumbna
 | `tests/mcp.rs` | Discovery, permissions, a refused path, the skill's manifest |
 | `tests/confine.rs` | On a kernel with Landlock: what a confined program can write, read and connect to |
 | Deployed | Every recipe in the factory's sandbox, `confine` there, and grants ending thumbnails |
+
+## URL security source transition
+
+The contract-only dependency edge moves to the qualified Core and SDK revisions
+using upstream url 2.5.9, which fixes RUSTSEC-2026-0592. Its public contract bytes
+are unchanged. This intermediate source is qualified only as a transitive native
+Cargo contract dependency, outside this workspace: optional Artifact and USD
+server edges still name their old exact pins. It is not a deployable server. A
+separate coherent full-server source must repin those edges, update its native
+Cargo lock and pass all ordinary Mac and Linux check stages before release.
