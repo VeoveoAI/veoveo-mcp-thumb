@@ -13,11 +13,11 @@ publish = false
 [workspace.dependencies]
 tempfile = "=3.27.0"
 # veoveo-core, pinned to one revision for every core crate.
-veoveo-skills = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "9be8fac678163aae5cc76b87987282f739d5c2bc" }
-veoveo-types = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "9be8fac678163aae5cc76b87987282f739d5c2bc" }
+veoveo-skills = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "d8b0e6fc857649b2c2dba081fce08946a33b6d97" }
+veoveo-types = { git = "https://github.com/VeoveoAI/veoveo-core", rev = "d8b0e6fc857649b2c2dba081fce08946a33b6d97" }
 # The Rust SDK for Veoveo MCP servers: the contract feature for declarations, the server
 # feature for hosting, registration and the forwarded identity.
-veoveo-hub-sdk = { git = "https://github.com/VeoveoAI/veoveo-hub-sdk", rev = "18a6e8c5f8a69ca57a6e12f8b752203574efa231", default-features = false }
+veoveo-hub-sdk = { git = "https://github.com/VeoveoAI/veoveo-hub-sdk", rev = "109da8467bfaf79fea9094bbb57e191fe43e9737", default-features = false }
 # Artifact's client, which reads an artifact's bytes. It pins this SDK revision, so the two move together.
 veoveo-mcp-artifact = { git = "https://github.com/VeoveoAI/veoveo-mcp-artifact", rev = "3f264d0aad2cdde70065ec2dcb3b8b51720d9ad2", default-features = false }
 # USD's contract, for its pictures of stages. The same.
@@ -41,7 +41,7 @@ secrecy = "0.10.3"
 sha2 = "=0.10.9"
 tracing = "0.1.44"
 tower = "0.5.3"
-url = "=2.5.8"
+url = "=2.5.9"
 
 schemars = { version = "1.2.2", features = ["uuid1"] }
 serde = { version = "=1.0.229", features = ["derive"] }
